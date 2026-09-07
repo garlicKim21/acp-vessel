@@ -95,8 +95,10 @@ if [[ -f /identity/.agents/requirements.txt ]]; then
 fi
 
 # MCP: one source (/identity/mcp.json, {"mcpServers": {...}} in Claude Code shape) → both harness formats.
+# Claude Code keeps its user config at $CLAUDE_CONFIG_DIR/.claude.json when CLAUDE_CONFIG_DIR is set (not ~/.claude.json —
+# a file there is silently ignored; `claude mcp list` showed "No MCP servers configured" until this was fixed, 2026-09-08).
 if [[ -f /identity/mcp.json ]]; then
-  node /usr/local/lib/vessel/render-mcp.js /identity/mcp.json "$HOME/.claude.json" "$CODEX_HOME/config.toml"
+  node /usr/local/lib/vessel/render-mcp.js /identity/mcp.json "$CLAUDE_CONFIG_DIR/.claude.json" "$CODEX_HOME/config.toml"
 fi
 
 # ---- 3. run -----------------------------------------------------------------
