@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# acp-vessel — disposable agent container. No identity, no secrets baked in.
-# Harness is chosen at runtime: BUZZ_ACP_AGENT_COMMAND=claude-agent-acp | codex-acp
+# acp-vessel — the stateless core of a disposable agent container:
+#   AI harness (Claude Code | Codex) + ACP adapter + buzz-acp. Nothing else.
+# Tools (kubectl, host diagnostics, secrets) live in sidecars on the agent's network, not here.
 
 ARG SPRIG_REF=main
 FROM ghcr.io/block/buzz-sprig:${SPRIG_REF} AS sprig
@@ -10,30 +11,19 @@ FROM node:24-bookworm-slim
 ARG CLAUDE_CODE_VERSION=2.1.263
 ARG CLAUDE_AGENT_ACP_VERSION=0.75.1
 ARG CODEX_ACP_VERSION=1.10.0
-ARG KUBECTL_VERSION=v1.37.0
-ARG TARGETARCH
 
 LABEL org.opencontainers.image.source="https://github.com/garlicKim21/acp-vessel" \
-      org.opencontainers.image.description="Disposable agent container: Claude Code or Codex behind an ACP adapter, identity mounted from git" \
+      org.opencontainers.image.description="Stateless agent core: Claude Code or Codex behind an ACP adapter, identity mounted from git" \
       acp-vessel.claude-code="${CLAUDE_CODE_VERSION}" \
       acp-vessel.claude-agent-acp="${CLAUDE_AGENT_ACP_VERSION}" \
-      acp-vessel.codex-acp="${CODEX_ACP_VERSION}" \
-      acp-vessel.kubectl="${KUBECTL_VERSION}"
+      acp-vessel.codex-acp="${CODEX_ACP_VERSION}"
 
-ENV DEBIAN_FRONTEND=noninteractive
-
-# Base tooling. openssh-client is for git over ssh only; no keys are ever baked in.
+# git over HTTPS only (token from env). No ssh, no curl, no interpreters beyond node.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
-      ca-certificates curl git gnupg jq less openssh-client procps python3 tini \
- && curl -1sLf 'https://artifacts-cli.infisical.com/setup.deb.sh' | bash \
- && apt-get install -y --no-install-recommends infisical \
- && curl -fsSLo /usr/local/bin/kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${TARGETARCH}/kubectl" \
- && chmod 0755 /usr/local/bin/kubectl \
- && ssh-keyscan -t ed25519,rsa,ecdsa github.com > /etc/ssh/ssh_known_hosts 2>/dev/null \
+ && apt-get install -y --no-install-recommends ca-certificates git tini \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex (platform package picked per arch).
+# Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex (platform package picked per arch); expose codex on PATH.
 RUN npm install -g --no-fund --no-audit \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
@@ -49,11 +39,11 @@ RUN for n in buzz-acp buzz buzz-agent buzz-dev-mcp rg tree git-credential-nostr 
 # Non-root user "agent" (uid 1000). Replaces the image's default "node" user so host volumes map cleanly.
 RUN userdel -r node 2>/dev/null || true \
  && useradd -m -u 1000 -s /bin/bash agent \
- && mkdir -p /identity /work /home/agent/.claude /home/agent/.codex /home/agent/.ssh \
- && chown -R agent:agent /identity /work /home/agent \
- && chmod 0700 /home/agent/.ssh
+ && mkdir -p /identity /work /home/agent/.claude /home/agent/.codex \
+ && chown -R agent:agent /identity /work /home/agent
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/vessel-entrypoint
+COPY --chmod=0755 render-mcp.js /usr/local/lib/vessel/render-mcp.js
 
 USER agent
 WORKDIR /work

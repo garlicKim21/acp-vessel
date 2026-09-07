@@ -1,26 +1,20 @@
 #!/usr/bin/env bash
 # acp-vessel entrypoint. Order:
-#   1. secrets  — if INFISICAL_TOKEN is set, re-exec once under `infisical run` (env injected at start, no runtime dependency)
-#   2. git      — deploy key from /run/secrets/git_deploy_key (read-only mount), identity + work repos clone or ff-pull
-#   3. identity — symlinks so both harnesses read the same memory, instructions, skills, MCP config
-#   4. run      — exec buzz-acp from the work directory (or any command given as arguments)
+#   1. git      — HTTPS token from env (VESSEL_GIT_TOKEN), identity + work repos clone or ff-pull
+#   2. identity — symlinks so both harnesses read the same memory, instructions, skills, MCP config
+#   3. run      — buzz-acp from the work directory (or any command given as arguments), with memory autosave backstop
+# Secrets arrive as plain environment: the host injects them (compose env_file, Infisical on the host). Nothing here talks to a vault.
 set -euo pipefail
 
 log() { printf '[vessel] %s\n' "$*" >&2; }
 
-# ---- 1. secrets -------------------------------------------------------------
-if [[ -n "${INFISICAL_TOKEN:-}" && -z "${VESSEL_SECRETS_LOADED:-}" ]]; then
-  export VESSEL_SECRETS_LOADED=1
-  : "${INFISICAL_PROJECT_ID:?INFISICAL_PROJECT_ID required with INFISICAL_TOKEN}"
-  log "injecting secrets from Infisical (project ${INFISICAL_PROJECT_ID}, env ${INFISICAL_ENV:-prod})"
-  exec infisical run ${INFISICAL_API_URL:+--domain "$INFISICAL_API_URL"} \
-       --projectId "$INFISICAL_PROJECT_ID" --env "${INFISICAL_ENV:-prod}" -- "$0" "$@"
-fi
-
-# ---- 2. git -----------------------------------------------------------------
-if [[ -r /run/secrets/git_deploy_key ]]; then
-  install -m 0600 /run/secrets/git_deploy_key "$HOME/.ssh/id_deploy"
-  export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/id_deploy -o IdentitiesOnly=yes"
+# ---- 1. git -----------------------------------------------------------------
+# Token-based HTTPS auth for every repo on VESSEL_GIT_HOST (default github.com). Stored 0600 inside the container only.
+if [[ -n "${VESSEL_GIT_TOKEN:-}" ]]; then
+  umask 077
+  printf 'https://%s:%s@%s\n' "${VESSEL_GIT_USER:-x-access-token}" "$VESSEL_GIT_TOKEN" "${VESSEL_GIT_HOST:-github.com}" > "$HOME/.git-credentials"
+  umask 022
+  git config --global credential.helper store
 fi
 [[ -n "${VESSEL_GIT_NAME:-}"  ]] && git config --global user.name  "$VESSEL_GIT_NAME"
 [[ -n "${VESSEL_GIT_EMAIL:-}" ]] && git config --global user.email "$VESSEL_GIT_EMAIL"
@@ -49,7 +43,7 @@ for url in ${VESSEL_WORK_REPOS:-}; do
 done
 WORK_DIR="${WORK_DIR:-/work}"
 
-# ---- 3. identity ------------------------------------------------------------
+# ---- 2. identity ------------------------------------------------------------
 # Claude Code keeps auto-memory under ~/.claude/projects/<slug>/memory where slug = cwd with '/' → '-'.
 # Link it to the identity repo so memory is git-backed and shared with Codex (which is told to read it via AGENTS.md).
 mkdir -p /identity/memory
@@ -74,37 +68,10 @@ fi
 
 # MCP: one source (/identity/mcp.json, {"mcpServers": {...}} in Claude Code shape) → both harness formats.
 if [[ -f /identity/mcp.json ]]; then
-  python3 - "$HOME/.claude.json" "$CODEX_HOME/config.toml" <<'PY'
-import json, sys, os, re
-claude_path, codex_path = sys.argv[1], sys.argv[2]
-servers = json.load(open('/identity/mcp.json')).get('mcpServers', {})
-# Claude Code: merge into ~/.claude.json
-cfg = {}
-if os.path.exists(claude_path):
-    try: cfg = json.load(open(claude_path))
-    except Exception: cfg = {}
-cfg['mcpServers'] = servers
-json.dump(cfg, open(claude_path, 'w'), indent=2)
-# Codex: replace a marker-delimited block in config.toml
-def toml_str(v): return json.dumps(v)
-lines = ['# >>> acp-vessel mcp (generated from /identity/mcp.json)']
-for name, s in servers.items():
-    lines.append(f'[mcp_servers.{name}]')
-    if 'command' in s: lines.append(f'command = {toml_str(s["command"])}')
-    if s.get('args'): lines.append('args = [' + ', '.join(toml_str(a) for a in s['args']) + ']')
-    if s.get('url'): lines.append(f'url = {toml_str(s["url"])}')
-    if s.get('env'):
-        lines.append(f'[mcp_servers.{name}.env]')
-        for k, v in s['env'].items(): lines.append(f'{k} = {toml_str(v)}')
-lines.append('# <<< acp-vessel mcp')
-block = '\n'.join(lines) + '\n'
-old = open(codex_path).read() if os.path.exists(codex_path) else ''
-new = re.sub(r'# >>> acp-vessel mcp.*?# <<< acp-vessel mcp\n', '', old, flags=re.S).rstrip('\n')
-open(codex_path, 'w').write((new + '\n\n' if new else '') + block)
-PY
+  node /usr/local/lib/vessel/render-mcp.js /identity/mcp.json "$HOME/.claude.json" "$CODEX_HOME/config.toml"
 fi
 
-# ---- 4. run -----------------------------------------------------------------
+# ---- 3. run -----------------------------------------------------------------
 cd "$WORK_DIR"
 log "harness=${BUZZ_ACP_AGENT_COMMAND} cwd=${WORK_DIR} identity=$(git -C /identity rev-parse --short HEAD 2>/dev/null || echo none)"
 if [[ "${VESSEL_DRY_RUN:-0}" == "1" ]]; then

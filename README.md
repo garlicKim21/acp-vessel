@@ -1,9 +1,10 @@
 # acp-vessel
 
-A disposable container image for running a coding agent as a long-lived peer behind the
-[Agent Client Protocol](https://agentclientprotocol.com). The vessel carries no identity of its own:
-memory, instructions, skills and MCP configuration are mounted from a git repository, and the
-harness is chosen at start time by pointing the ACP adapter at either Claude Code or Codex.
+The stateless core of a disposable agent container: an AI harness (Claude Code or Codex), the
+[Agent Client Protocol](https://agentclientprotocol.com) adapter for it, and the buzz relay bridge.
+Nothing else. The vessel carries no identity and no tools: memory, instructions, skills and MCP
+configuration come from a git repository mounted at `/identity`; tools that need credentials
+(Kubernetes, host diagnostics, secrets) run as sidecars on the agent's network and are reached over MCP.
 
 Built for [buzz](https://github.com/block/buzz): the entrypoint is `buzz-acp` (from the `sprig`
 multicall binary), which bridges relay events to the ACP agent.
@@ -17,9 +18,17 @@ multicall binary), which bridges relay events to the ACP agent.
 | base | `node:24-bookworm-slim`, non-root user `agent` (uid 1000), `tini` | Dockerfile |
 | harness | `@anthropic-ai/claude-code`, `@agentclientprotocol/claude-agent-acp`, `@agentclientprotocol/codex-acp` (bundles `@openai/codex`; `codex` is on PATH) | build args |
 | relay | `sprig` from `ghcr.io/block/buzz-sprig` with `buzz-acp` and helper links | `SPRIG_REF` build arg |
-| tools | git, openssh-client (no keys baked in), curl, jq, python3, kubectl, infisical CLI | Dockerfile |
+| plumbing | git (HTTPS only), `tini` | Dockerfile |
 
-The image contains no credentials and no identity. It is safe to publish and to rebuild at any time.
+The image contains no credentials, no identity and no operational tooling. It is safe to publish and to rebuild at any time.
+What is deliberately not in the image, and where it goes instead:
+
+| Not here | Instead |
+|---|---|
+| kubectl, cloud CLIs | a sidecar MCP server on the agent's network that holds the kubeconfig; the vessel never sees it |
+| secrets client (Infisical etc.) | the host renders the env file and hands plain environment to the container |
+| ssh | git over HTTPS with a scoped token; host diagnostics via a sidecar, not a shell |
+| python, curl, jq | not needed by the entrypoint; the harness brings its own tools |
 
 ## Layout at runtime
 
@@ -27,13 +36,11 @@ The image contains no credentials and no identity. It is safe to publish and to 
 /identity            git clone of the identity repo (private): memory/  AGENTS.md  .agents/skills/  mcp.json
 /work/<repo>         git clone(s) of the code the agent works on; the first one is the cwd
 /home/agent/.codex   volume: Codex auth.json and config.toml (re-creatable)
-/run/secrets/git_deploy_key   read-only mount, used only for git over ssh
 ```
 
 The entrypoint, in order:
 
-1. If `INFISICAL_TOKEN` is set, re-exec once under `infisical run` so secrets arrive as environment at
-   start. There is no runtime dependency on the secrets service after that.
+1. Store the git token (`VESSEL_GIT_TOKEN`) for HTTPS access, 0600 inside the container.
 2. Clone or fast-forward `/identity` and each `/work/<repo>`.
 3. Wire identity into both harnesses with symlinks:
    `~/.claude/projects/<cwd-slug>/memory → /identity/memory` (Claude Code auto-memory is path-keyed),
@@ -54,7 +61,7 @@ See [`vessel.env.example`](vessel.env.example). The important ones:
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude subscription token from `claude setup-token` (one year) |
 | `VESSEL_IDENTITY_REPO`, `VESSEL_WORK_REPOS`, `VESSEL_WORK_DIR` | What to clone and where to run |
 | `VESSEL_GIT_NAME`, `VESSEL_GIT_EMAIL` | Commit author for pushes made by the agent |
-| `INFISICAL_TOKEN`, `INFISICAL_PROJECT_ID`, `INFISICAL_ENV` | Optional secret injection at start |
+| `VESSEL_GIT_TOKEN`, `VESSEL_GIT_HOST` | Fine-grained token scoped to the identity and work repos |
 | `VESSEL_DRY_RUN=1` | Do everything except starting the harness; print the links |
 
 Codex uses the ChatGPT subscription through `codex login --device-auth`, run once inside the
@@ -66,13 +73,13 @@ container; the resulting `auth.json` lives in the `.codex` volume.
 docker run -d --name hub-agent \
   --env-file hub.env \
   -v hub-identity:/identity -v hub-work:/work -v hub-codex:/home/agent/.codex \
-  -v /srv/hub-agent/deploy_key:/run/secrets/git_deploy_key:ro \
   --network vessel --memory 2g \
   ghcr.io/garlickim21/acp-vessel:latest
 ```
 
-Do not mount the docker socket, `~/.ssh`, or cloud credentials into the vessel. It runs the harness
-with permissions bypassed (headless), so anything mounted is reachable by the agent.
+Do not mount the docker socket, ssh keys, kubeconfigs or cloud credentials into the vessel. It runs the
+harness with permissions bypassed (headless), so anything mounted is reachable by the agent. Give those
+to a sidecar and expose it over MCP (`/identity/mcp.json`) instead, one sidecar instance per agent network.
 
 ## Building locally
 
@@ -82,4 +89,4 @@ docker run --rm -e VESSEL_DRY_RUN=1 -v ./identity:/identity -v ./work:/work acp-
 ```
 
 Versions are build args (`CLAUDE_CODE_VERSION`, `CLAUDE_AGENT_ACP_VERSION`, `CODEX_ACP_VERSION`,
-`KUBECTL_VERSION`, `SPRIG_REF`) and are recorded as image labels.
+`SPRIG_REF`) and are recorded as image labels.
