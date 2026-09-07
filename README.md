@@ -46,7 +46,7 @@ The entrypoint, in order:
 3. Wire identity into both harnesses:
    memory — `autoMemoryDirectory: /identity/memory` in `~/.claude/settings.json` (plus the cwd-slug symlink as a fallback); Codex is told by AGENTS.md to read and write the same files, and its own Memories feature is rendered off,
    instructions — `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` are one rendered file: `/identity/common/USER.md` (if present) followed by `/identity/AGENTS.md` (Codex has no import syntax),
-   skills — `~/.agents/skills → /identity/.agents/skills` (Codex) and one link per skill under `~/.claude/skills/` (Claude Code); repo-level skills live in each work repo's `.agents/skills/` with `.claude/skills/<name>` symlinks committed alongside,
+   skills — one link per skill under `~/.agents/skills/` (Codex) and `~/.claude/skills/` (Claude Code), from two layers: `/identity/common/.agents/skills` (routines every agent shares) then `/identity/.agents/skills` (wins on a name collision). Per-agent additions to a common skill are a drop-in `/identity/.agents/skill-local/<name>.md` that the common skill reads. Repo-level skills live in each work repo's `.agents/skills/` with `.claude/skills/<name>` symlinks committed alongside,
    MCP — `/identity/mcp.json` rendered into `~/.claude.json` and `~/.codex/config.toml`.
 4. Run `buzz-acp` from the work directory, with a memory autosave backstop: if `/identity` or `/identity/common` is dirty it is committed and pushed every `VESSEL_AUTOSAVE_INTERVAL` seconds (default 600) and on SIGTERM. The agent is still expected to commit its own memory at session wrap-up; this only prevents loss on recycle. Any arguments given to the container replace this
    (e.g. `codex login --device-auth`, or `bash` for inspection).

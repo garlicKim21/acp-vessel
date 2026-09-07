@@ -68,14 +68,20 @@ if [[ -f /identity/AGENTS.md ]]; then
   cp "$CODEX_HOME/AGENTS.md" "$CLAUDE_CONFIG_DIR/CLAUDE.md"
 fi
 
-# Skills: canonical in /identity/.agents/skills (Codex scans ~/.agents/skills). Claude Code only scans ~/.claude/skills.
-if [[ -d /identity/.agents/skills ]]; then
-  mkdir -p "$HOME/.agents" "$CLAUDE_CONFIG_DIR/skills"
-  ln -sfn /identity/.agents/skills "$HOME/.agents/skills"
-  for d in /identity/.agents/skills/*/; do
-    [[ -f "$d/SKILL.md" ]] && ln -sfn "${d%/}" "$CLAUDE_CONFIG_DIR/skills/$(basename "$d")"
+# Skills: two layers, both Agent Skills standard (<name>/SKILL.md). Common user layer first (/identity/common/.agents/skills:
+# routines every agent shares, e.g. session-start/wrapup), then the identity repo (/identity/.agents/skills) which wins on a
+# name collision. Codex scans ~/.agents/skills, Claude Code only ~/.claude/skills — both get one link per skill. Per-agent
+# additions to a common skill go in /identity/.agents/skill-local/<name>.md (read by the common skill, no name collision).
+mkdir -p "$HOME/.agents/skills" "$CLAUDE_CONFIG_DIR/skills"
+for layer in /identity/common/.agents/skills /identity/.agents/skills; do
+  [[ -d "$layer" ]] || continue
+  for d in "$layer"/*/; do
+    [[ -f "$d/SKILL.md" ]] || continue
+    n="$(basename "$d")"
+    ln -sfn "${d%/}" "$HOME/.agents/skills/$n"
+    ln -sfn "${d%/}" "$CLAUDE_CONFIG_DIR/skills/$n"
   done
-fi
+done
 
 # MCP: one source (/identity/mcp.json, {"mcpServers": {...}} in Claude Code shape) → both harness formats.
 if [[ -f /identity/mcp.json ]]; then
