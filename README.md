@@ -40,7 +40,7 @@ The entrypoint, in order:
    `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md → /identity/AGENTS.md`,
    `~/.agents/skills → /identity/.agents/skills` (Codex) and one link per skill under `~/.claude/skills/` (Claude Code),
    and `/identity/mcp.json` rendered into `~/.claude.json` and `~/.codex/config.toml`.
-4. `exec buzz-acp` from the work directory. Any arguments given to the container replace this
+4. Run `buzz-acp` from the work directory, with a memory autosave backstop: if `/identity` is dirty it is committed and pushed every `VESSEL_AUTOSAVE_INTERVAL` seconds (default 600) and on SIGTERM. The agent is still expected to commit its own memory at session wrap-up; this only prevents loss on recycle. Any arguments given to the container replace this
    (e.g. `codex login --device-auth`, or `bash` for inspection).
 
 ## Environment

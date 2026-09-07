@@ -113,4 +113,22 @@ fi
 if [[ $# -gt 0 ]]; then exec "$@"; fi
 : "${BUZZ_PRIVATE_KEY:?BUZZ_PRIVATE_KEY required}"
 export BUZZ_ACP_SESSION_TITLE="${BUZZ_ACP_SESSION_TITLE:-$(basename "$WORK_DIR")}"
-exec buzz-acp
+
+# Memory autosave backstop. The agent is responsible for committing its identity repo at session wrap-up;
+# this only prevents loss when the container is recycled without one. Never rewrites history, never forces.
+autosave() {
+  [[ -d /identity/.git ]] || return 0
+  if [[ -n "$(git -C /identity status --porcelain 2>/dev/null)" ]]; then
+    git -C /identity add -A \
+      && git -C /identity -c user.name="${VESSEL_GIT_NAME:-vessel}" -c user.email="${VESSEL_GIT_EMAIL:-vessel@localhost}" \
+             commit -q -m "memory autosave $(date -u +%FT%TZ)" \
+      && { git -C /identity push -q 2>/dev/null || log "warn: autosave push failed (kept locally)"; } \
+      && log "autosave: identity committed"
+  fi
+}
+buzz-acp & child=$!
+( while sleep "${VESSEL_AUTOSAVE_INTERVAL:-600}"; do autosave; done ) & saver=$!
+trap 'log "signal: saving identity, stopping harness"; autosave; kill -TERM "$child" 2>/dev/null' TERM INT
+wait "$child"; rc=$?
+kill "$saver" 2>/dev/null; autosave
+exit "$rc"
