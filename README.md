@@ -21,6 +21,11 @@ multicall binary), which bridges relay events to the ACP agent.
 | plumbing | git (HTTPS only), `tini` | Dockerfile |
 
 The image contains no credentials, no identity and no operational tooling. It is safe to publish and to rebuild at any time.
+
+Runtimes are the one exception to "nothing else": node (the harnesses need it) and python3 + pip, so the agent can *make* tools
+rather than wait for them to be baked in. The tools themselves live in git (work repo `scripts/`, or an identity skill's
+`scripts/`), and the libraries they need are declared by the identity repo in `.agents/requirements.txt`, which the entrypoint
+installs into the `/home/agent/.local` cache volume on start. Anything needing a credential the body does not hold is a sidecar.
 What is deliberately not in the image, and where it goes instead:
 
 | Not here | Instead |
@@ -63,6 +68,7 @@ See [`vessel.env.example`](vessel.env.example). The important ones:
 | `VESSEL_IDENTITY_REPO`, `VESSEL_COMMON_REPO`, `VESSEL_WORK_REPOS`, `VESSEL_WORK_DIR` | What to clone and where to run (`VESSEL_COMMON_REPO` optional) |
 | `VESSEL_GIT_NAME`, `VESSEL_GIT_EMAIL` | Commit author for pushes made by the agent |
 | `VESSEL_GIT_TOKEN`, `VESSEL_GIT_HOST` | Fine-grained token scoped to the identity and work repos |
+| `VM_URL`, `LOKI_URL`, `VERIFY_AUTH_TOKEN` | Optional. Read-only observability path for the work repo's verify scripts (hub vmauth :8427, query paths only). A port the human plugs in; the scripts are the agent's |
 | `VESSEL_DRY_RUN=1` | Do everything except starting the harness; print the links |
 
 Codex uses the ChatGPT subscription through `codex login --device-auth`, run once inside the

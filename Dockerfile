@@ -18,9 +18,11 @@ LABEL org.opencontainers.image.source="https://github.com/garlicKim21/acp-vessel
       acp-vessel.claude-agent-acp="${CLAUDE_AGENT_ACP_VERSION}" \
       acp-vessel.codex-acp="${CODEX_ACP_VERSION}"
 
-# git over HTTPS only (token from env). No ssh, no curl, no interpreters beyond node.
+# git over HTTPS only (token from env). No ssh, no curl. Interpreters: node (harness) and python3 (the agent's
+# tool-making runtime — verify scripts and the like live in git, see README "tools"). Libraries are not baked in:
+# the identity repo declares them (.agents/requirements.txt) and the entrypoint installs into a cache volume.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git tini \
+ && apt-get install -y --no-install-recommends ca-certificates git tini python3 python3-pip python3-venv \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex (platform package picked per arch); expose codex on PATH.
@@ -39,7 +41,7 @@ RUN for n in buzz-acp buzz buzz-agent buzz-dev-mcp rg tree git-credential-nostr 
 # Non-root user "agent" (uid 1000). Replaces the image's default "node" user so host volumes map cleanly.
 RUN userdel -r node 2>/dev/null || true \
  && useradd -m -u 1000 -s /bin/bash agent \
- && mkdir -p /identity /work /home/agent/.claude /home/agent/.codex \
+ && mkdir -p /identity /work /home/agent/.claude /home/agent/.codex /home/agent/.local \
  && chown -R agent:agent /identity /work /home/agent
 
 COPY --chmod=0755 entrypoint.sh /usr/local/bin/vessel-entrypoint
@@ -51,9 +53,11 @@ ENV HOME=/home/agent \
     CLAUDE_CONFIG_DIR=/home/agent/.claude \
     CODEX_HOME=/home/agent/.codex \
     DISABLE_AUTOUPDATER=1 \
+    PATH=/home/agent/.local/bin:/usr/local/bin:/usr/bin:/bin \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
     BUZZ_ACP_AGENT_COMMAND=claude-agent-acp \
     BUZZ_ACP_AGENT_ARGS= \
     BUZZ_ACP_RESPOND_TO=owner-only
 
-VOLUME ["/identity", "/work", "/home/agent/.codex"]
+VOLUME ["/identity", "/work", "/home/agent/.codex", "/home/agent/.local"]
 ENTRYPOINT ["tini", "--", "/usr/local/bin/vessel-entrypoint"]

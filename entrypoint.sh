@@ -83,6 +83,17 @@ for layer in /identity/common/.agents/skills /identity/.agents/skills; do
   done
 done
 
+# Dependencies: the identity repo declares Python libraries its tools need (/identity/.agents/requirements.txt); they are
+# installed per user into /home/agent/.local (a cache volume, so a restart does not re-download). The body stays stateless —
+# what to install is the identity's to say, and the tools themselves are in git (work repo scripts/ or identity skills/).
+if [[ -f /identity/.agents/requirements.txt ]]; then
+  if python3 -m pip install --user -q --break-system-packages -r /identity/.agents/requirements.txt; then
+    log "deps: /identity/.agents/requirements.txt installed"
+  else
+    log "warn: deps install failed (continuing without)"
+  fi
+fi
+
 # MCP: one source (/identity/mcp.json, {"mcpServers": {...}} in Claude Code shape) → both harness formats.
 if [[ -f /identity/mcp.json ]]; then
   node /usr/local/lib/vessel/render-mcp.js /identity/mcp.json "$HOME/.claude.json" "$CODEX_HOME/config.toml"
