@@ -34,6 +34,7 @@ What is deliberately not in the image, and where it goes instead:
 
 ```
 /identity            git clone of the identity repo (private): memory/  AGENTS.md  .agents/skills/  mcp.json
+/identity/common     git clone of the shared user layer (private, optional): USER.md  memory/ — gitignored by the identity repo
 /work/<repo>         git clone(s) of the code the agent works on; the first one is the cwd
 /home/agent/.codex   volume: Codex auth.json and config.toml (re-creatable)
 ```
@@ -42,12 +43,12 @@ The entrypoint, in order:
 
 1. Store the git token (`VESSEL_GIT_TOKEN`) for HTTPS access, 0600 inside the container.
 2. Clone or fast-forward `/identity` and each `/work/<repo>`.
-3. Wire identity into both harnesses with symlinks:
-   `~/.claude/projects/<cwd-slug>/memory → /identity/memory` (Claude Code auto-memory is path-keyed),
-   `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md → /identity/AGENTS.md`,
-   `~/.agents/skills → /identity/.agents/skills` (Codex) and one link per skill under `~/.claude/skills/` (Claude Code),
-   and `/identity/mcp.json` rendered into `~/.claude.json` and `~/.codex/config.toml`.
-4. Run `buzz-acp` from the work directory, with a memory autosave backstop: if `/identity` is dirty it is committed and pushed every `VESSEL_AUTOSAVE_INTERVAL` seconds (default 600) and on SIGTERM. The agent is still expected to commit its own memory at session wrap-up; this only prevents loss on recycle. Any arguments given to the container replace this
+3. Wire identity into both harnesses:
+   memory — `autoMemoryDirectory: /identity/memory` in `~/.claude/settings.json` (plus the cwd-slug symlink as a fallback); Codex is told by AGENTS.md to read and write the same files, and its own Memories feature is rendered off,
+   instructions — `~/.claude/CLAUDE.md` and `~/.codex/AGENTS.md` are one rendered file: `/identity/common/USER.md` (if present) followed by `/identity/AGENTS.md` (Codex has no import syntax),
+   skills — `~/.agents/skills → /identity/.agents/skills` (Codex) and one link per skill under `~/.claude/skills/` (Claude Code); repo-level skills live in each work repo's `.agents/skills/` with `.claude/skills/<name>` symlinks committed alongside,
+   MCP — `/identity/mcp.json` rendered into `~/.claude.json` and `~/.codex/config.toml`.
+4. Run `buzz-acp` from the work directory, with a memory autosave backstop: if `/identity` or `/identity/common` is dirty it is committed and pushed every `VESSEL_AUTOSAVE_INTERVAL` seconds (default 600) and on SIGTERM. The agent is still expected to commit its own memory at session wrap-up; this only prevents loss on recycle. Any arguments given to the container replace this
    (e.g. `codex login --device-auth`, or `bash` for inspection).
 
 ## Environment
@@ -59,7 +60,7 @@ See [`vessel.env.example`](vessel.env.example). The important ones:
 | `BUZZ_RELAY_URL`, `BUZZ_PRIVATE_KEY`, `BUZZ_ACP_AGENT_OWNER` | The agent's identity on the relay |
 | `BUZZ_ACP_AGENT_COMMAND` | `claude-agent-acp` (default) or `codex-acp`. Restart to switch |
 | `CLAUDE_CODE_OAUTH_TOKEN` | Claude subscription token from `claude setup-token` (one year) |
-| `VESSEL_IDENTITY_REPO`, `VESSEL_WORK_REPOS`, `VESSEL_WORK_DIR` | What to clone and where to run |
+| `VESSEL_IDENTITY_REPO`, `VESSEL_COMMON_REPO`, `VESSEL_WORK_REPOS`, `VESSEL_WORK_DIR` | What to clone and where to run (`VESSEL_COMMON_REPO` optional) |
 | `VESSEL_GIT_NAME`, `VESSEL_GIT_EMAIL` | Commit author for pushes made by the agent |
 | `VESSEL_GIT_TOKEN`, `VESSEL_GIT_HOST` | Fine-grained token scoped to the identity and work repos |
 | `VESSEL_DRY_RUN=1` | Do everything except starting the harness; print the links |

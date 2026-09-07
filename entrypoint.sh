@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # acp-vessel entrypoint. Order:
 #   1. git      — HTTPS token from env (VESSEL_GIT_TOKEN), identity + work repos clone or ff-pull
-#   2. identity — symlinks so both harnesses read the same memory, instructions, skills, MCP config
+#   2. identity — both harnesses read the same memory, instructions (common user layer + identity), skills, MCP config
 #   3. run      — buzz-acp from the work directory (or any command given as arguments), with memory autosave backstop
 # Secrets arrive as plain environment: the host injects them (compose env_file, Infisical on the host). Nothing here talks to a vault.
 set -euo pipefail
@@ -33,8 +33,10 @@ sync_repo() {  # sync_repo <url> <dir>
   fi
 }
 
-# Identity repo → /identity. Work repos → /work/<name>. First work repo is the default cwd.
+# Identity repo → /identity. Common user layer (shared by every agent) → /identity/common, which the identity
+# repo gitignores so it is a separate clone, not untracked content. Work repos → /work/<name>; first one is the cwd.
 sync_repo "${VESSEL_IDENTITY_REPO:-}" /identity
+[[ -n "${VESSEL_COMMON_REPO:-}" ]] && sync_repo "$VESSEL_COMMON_REPO" /identity/common
 WORK_DIR="${VESSEL_WORK_DIR:-}"
 for url in ${VESSEL_WORK_REPOS:-}; do
   name="$(basename "${url%.git}")"
@@ -44,17 +46,26 @@ done
 WORK_DIR="${WORK_DIR:-/work}"
 
 # ---- 2. identity ------------------------------------------------------------
-# Claude Code keeps auto-memory under ~/.claude/projects/<slug>/memory where slug = cwd with '/' → '-'.
-# Link it to the identity repo so memory is git-backed and shared with Codex (which is told to read it via AGENTS.md).
+# Memory: git-backed in /identity/memory, shared by both harnesses. Claude Code is pointed there with the
+# `autoMemoryDirectory` setting (user scope); the cwd-slug symlink is kept as a belt-and-braces fallback for
+# older harness versions. Codex has no per-fact memory: AGENTS.md tells it to read MEMORY.md and write the same files.
+# Codex's own "Memories" (background transcript summaries, global, in ~/.codex) stays off — it is not curated and not git.
 mkdir -p /identity/memory
+node -e '
+const fs=require("fs"),p=process.argv[1];let c={};try{c=JSON.parse(fs.readFileSync(p,"utf8"))}catch{}
+c.autoMemoryDirectory="/identity/memory";fs.writeFileSync(p,JSON.stringify(c,null,2)+"\n")' "$CLAUDE_CONFIG_DIR/settings.json"
 slug="${WORK_DIR//\//-}"
 mkdir -p "$CLAUDE_CONFIG_DIR/projects/$slug"
 ln -sfn /identity/memory "$CLAUDE_CONFIG_DIR/projects/$slug/memory"
 
-# Instructions: AGENTS.md is canonical. Claude reads ~/.claude/CLAUDE.md, Codex reads $CODEX_HOME/AGENTS.md.
+# Instructions: one rendered file = common user layer (USER.md, if present) + identity AGENTS.md. Codex has no
+# import syntax, so both harnesses get the concatenation: ~/.claude/CLAUDE.md and $CODEX_HOME/AGENTS.md.
 if [[ -f /identity/AGENTS.md ]]; then
-  ln -sfn /identity/AGENTS.md "$CLAUDE_CONFIG_DIR/CLAUDE.md"
-  ln -sfn /identity/AGENTS.md "$CODEX_HOME/AGENTS.md"
+  {
+    if [[ -f /identity/common/USER.md ]]; then cat /identity/common/USER.md; printf '\n\n'; fi
+    cat /identity/AGENTS.md
+  } > "$CODEX_HOME/AGENTS.md"
+  cp "$CODEX_HOME/AGENTS.md" "$CLAUDE_CONFIG_DIR/CLAUDE.md"
 fi
 
 # Skills: canonical in /identity/.agents/skills (Codex scans ~/.agents/skills). Claude Code only scans ~/.claude/skills.
@@ -83,16 +94,18 @@ export BUZZ_ACP_SESSION_TITLE="${BUZZ_ACP_SESSION_TITLE:-$(basename "$WORK_DIR")
 
 # Memory autosave backstop. The agent is responsible for committing its identity repo at session wrap-up;
 # this only prevents loss when the container is recycled without one. Never rewrites history, never forces.
-autosave() {
-  [[ -d /identity/.git ]] || return 0
-  if [[ -n "$(git -C /identity status --porcelain 2>/dev/null)" ]]; then
-    git -C /identity add -A \
-      && git -C /identity -c user.name="${VESSEL_GIT_NAME:-vessel}" -c user.email="${VESSEL_GIT_EMAIL:-vessel@localhost}" \
+autosave_repo() {  # autosave_repo <dir>
+  local dir="$1"
+  [[ -d "$dir/.git" ]] || return 0
+  if [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+    git -C "$dir" add -A \
+      && git -C "$dir" -c user.name="${VESSEL_GIT_NAME:-vessel}" -c user.email="${VESSEL_GIT_EMAIL:-vessel@localhost}" \
              commit -q -m "memory autosave $(date -u +%FT%TZ)" \
-      && { git -C /identity push -q 2>/dev/null || log "warn: autosave push failed (kept locally)"; } \
-      && log "autosave: identity committed"
+      && { git -C "$dir" push -q 2>/dev/null || log "warn: autosave push failed in $dir (kept locally)"; } \
+      && log "autosave: $dir committed"
   fi
 }
+autosave() { autosave_repo /identity/common; autosave_repo /identity; }
 buzz-acp & child=$!
 ( while sleep "${VESSEL_AUTOSAVE_INTERVAL:-600}"; do autosave; done ) & saver=$!
 trap 'log "signal: saving identity, stopping harness"; autosave; kill -TERM "$child" 2>/dev/null' TERM INT

@@ -13,6 +13,9 @@ fs.writeFileSync(claudePath, JSON.stringify(cfg, null, 2) + '\n');
 // Codex: replace a marker-delimited block in config.toml
 const q = (v) => JSON.stringify(String(v));
 const lines = ['# >>> acp-vessel mcp (generated from /identity/mcp.json)'];
+// Vessel defaults: Codex Memories (background transcript summaries, global to CODEX_HOME) stay off.
+// Memory is the git-backed /identity/memory that AGENTS.md points at; a second uncurated store would drift from it.
+lines.push('[features]', 'memories = false', '');
 for (const [name, s] of Object.entries(servers)) {
   lines.push(`[mcp_servers.${name}]`);
   if (s.command) lines.push(`command = ${q(s.command)}`);
