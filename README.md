@@ -67,7 +67,7 @@ docker run -d --name hub-agent \
   --env-file hub.env \
   -v hub-identity:/identity -v hub-work:/work -v hub-codex:/home/agent/.codex \
   -v /srv/hub-agent/deploy_key:/run/secrets/git_deploy_key:ro \
-  --network body --memory 2g \
+  --network vessel --memory 2g \
   ghcr.io/garlickim21/acp-vessel:latest
 ```
 
