@@ -18,11 +18,12 @@ LABEL org.opencontainers.image.source="https://github.com/garlicKim21/acp-vessel
       acp-vessel.claude-agent-acp="${CLAUDE_AGENT_ACP_VERSION}" \
       acp-vessel.codex-acp="${CODEX_ACP_VERSION}"
 
-# git over HTTPS only (token from env). No ssh, no curl. Interpreters: node (harness) and python3 (the agent's
+# git over HTTPS only (token from env). No ssh. curl is included (2026-09-08): it adds no capability node/python
+# lack, and it lets the body run the same hand-check commands the host docs use. Interpreters: node (harness) and python3 (the agent's
 # tool-making runtime — verify scripts and the like live in git, see README "tools"). Libraries are not baked in:
 # the identity repo declares them (.agents/requirements.txt) and the entrypoint installs into a cache volume.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates git tini python3 python3-pip python3-venv \
+ && apt-get install -y --no-install-recommends ca-certificates git tini curl python3 python3-pip python3-venv \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex (platform package picked per arch); expose codex on PATH.

@@ -26,7 +26,7 @@ Runtimes are the one exception to "nothing else": node (the harnesses need it) a
 rather than wait for them to be baked in. The tools themselves live in git (work repo `scripts/`, or an identity skill's
 `scripts/`), and the libraries they need are declared by the identity repo in `.agents/requirements.txt`, which the entrypoint
 installs into the `/home/agent/.local` cache volume on start. Anything needing a credential the body does not hold is a sidecar.
-What is deliberately not in the image, and where it goes instead:
+What is deliberately not in the image, and where it goes instead: curl is present too (2026-09-08) as a convenience, not a capability: node and python already speak HTTP, and it lets the body run the same hand-check commands the host runbooks use.
 
 | Not here | Instead |
 |---|---|
