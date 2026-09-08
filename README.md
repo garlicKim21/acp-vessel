@@ -75,7 +75,7 @@ Codex uses the ChatGPT subscription through `codex login --device-auth`, run onc
 container; the resulting `auth.json` lives in the `.codex` volume. The headless alternative is to copy an
 `auth.json` from a machine where `codex login` already ran into that volume (`docker cp auth.json <agent>:/home/agent/.codex/`,
 owner uid 1000, mode 0600). The same credential on two devices refreshes independently; whether one side gets logged out is
-being measured (hermod 07, open item).
+being measured (open item in the fleet's design notes).
 
 ## Running
 
