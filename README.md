@@ -72,7 +72,10 @@ See [`vessel.env.example`](vessel.env.example). The important ones:
 | `VESSEL_DRY_RUN=1` | Do everything except starting the harness; print the links |
 
 Codex uses the ChatGPT subscription through `codex login --device-auth`, run once inside the
-container; the resulting `auth.json` lives in the `.codex` volume.
+container; the resulting `auth.json` lives in the `.codex` volume. The headless alternative is to copy an
+`auth.json` from a machine where `codex login` already ran into that volume (`docker cp auth.json <agent>:/home/agent/.codex/`,
+owner uid 1000, mode 0600). The same credential on two devices refreshes independently; whether one side gets logged out is
+being measured (hermod 07, open item).
 
 ## Running
 

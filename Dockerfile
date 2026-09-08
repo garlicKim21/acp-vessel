@@ -26,13 +26,20 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates git tini curl python3 python3-pip python3-venv \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
-# Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex (platform package picked per arch); expose codex on PATH.
-RUN npm install -g --no-fund --no-audit \
+# Harnesses and ACP adapters, pinned. codex-acp bundles @openai/codex, whose binary is a per-platform optional
+# dependency (@openai/codex-linux-{x64,arm64}). Under buildx QEMU emulation npm dropped the arm64 one (2026-09-08,
+# sha-c4ddd8c: amd64 had it, arm64 did not, `codex` threw "Missing optional dependency"), so pin the platform from
+# buildx's TARGETARCH instead of trusting the emulated process.arch, and fail the build if the binary does not run.
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in amd64) NPM_CPU=x64 ;; arm64) NPM_CPU=arm64 ;; *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; esac \
+ && npm install -g --no-fund --no-audit --os=linux --cpu="${NPM_CPU}" \
       "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
       "@agentclientprotocol/claude-agent-acp@${CLAUDE_AGENT_ACP_VERSION}" \
       "@agentclientprotocol/codex-acp@${CODEX_ACP_VERSION}" \
  && ln -s /usr/local/lib/node_modules/@agentclientprotocol/codex-acp/node_modules/.bin/codex /usr/local/bin/codex \
- && npm cache clean --force
+ && npm cache clean --force \
+ && codex --version \
+ && claude --version
 
 # sprig: static multicall binary (buzz-acp and helpers). Personality is chosen by argv[0].
 COPY --from=sprig /usr/local/bin/sprig /usr/local/bin/sprig
